@@ -10,7 +10,7 @@ env:
   iMageSize: 50GiB
   MainDir: /builder
 
-  BuildDL: https://github.com/1compk/dl/releases/download/dl/Armbian.Build.v26.2.0-trunk.844.fix.tar.xz
+  BuildDL: https://github.com/1ComputerPK/dl/releases/download/dl/Armbian.Build.v26.2.0-trunk.844.fix.tar.xz
   BuildSource: Armbian.Build.v26.2.0-trunk.844.fix.tar.xz
   BuildDir: zArmbian.Build.2026
   UefiVersion: 26.5.1
