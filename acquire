@@ -16,7 +16,6 @@ ANALYSIS_DIR="${WORK}/packages"
 SUPPORT_DIR="/usr/share/minios/kernel-dpkg"
 PACKAGE_TABLE="${WORK}/packages.tsv"
 REPOSITORY_TABLE="${WORK}/repositories.tsv"
-KERNEL_VERSION=""
 
 cleanup() {
     rm -rf "${WORK}"
@@ -74,7 +73,7 @@ configure_repositories() {
         buster)
             add_repository "http://archive.debian.org/debian" buster "main" "${KEYRING}"
             ;;
-        bullseye | bookworm | trixie | excalibur)
+        bullseye | bookworm | trixie)
             add_repository "http://deb.debian.org/debian" "${KERNEL_SOURCE_SUITE}" "main" "${KEYRING}"
             add_repository "http://deb.debian.org/debian" "${KERNEL_SOURCE_SUITE}-updates" "main" "${KEYRING}"
             add_repository "http://security.debian.org/debian-security" "${KERNEL_SOURCE_SUITE}-security" "main" "${KEYRING}"
@@ -141,11 +140,6 @@ resolve_ubuntu_kernel_payload_requests() {
             ALTERNATIVE="$(echo "${ALTERNATIVE}" | xargs)"
             PACKAGE="${ALTERNATIVE%% *}"
             PACKAGE="${PACKAGE%%:*}"
-
-            if [[ "${PACKAGE}" =~ [-_]rt([-_]|[0-9]) ]] || [[ "${PACKAGE}" =~ [-_]cloud([-_]|[0-9]) ]] || [[ "${PACKAGE}" == *realtime* ]]; then
-                continue
-            fi
-
             case "${PACKAGE}" in
             linux-image-[0-9]*)
                 UBUNTU_KERNEL_REQUESTS+=("${PACKAGE}:${KERNEL_APT_ARCH}")
@@ -203,11 +197,6 @@ download_packages() {
 
     [ "${KERNEL_BUILD_DKMS}" = true ] && REQUESTS+=("${KERNEL_HEADER_REQUEST}")
     apt-get "${OPTIONS[@]}" --download-only --no-install-recommends -y install "${REQUESTS[@]}"
-
-    find "${DOWNLOAD_DIR}" -maxdepth 1 -type f \
-        \( -name '*[-_]rt[-_]*' -o -name '*[-_]rt[0-9]*' -o -name '*[-_]cloud[-_]*' -o -name '*[-_]cloud[0-9]*' -o -name '*realtime*' \) \
-        -exec rm -f {} +
-
     find "${DOWNLOAD_DIR}" -maxdepth 1 -type f -name '*.deb' -print -quit | grep -q . ||
         fail "Private APT did not download the selected kernel closure"
 }
@@ -221,10 +210,7 @@ use_local_packages() {
     done < <(find /rootcopy-install -maxdepth 1 -type f \
         \( -name 'linux-image-*.deb' -o -name 'linux-binary-*.deb' \
         -o -name 'linux-base-*.deb' -o -name 'linux-modules-*.deb' \
-        -o -name 'linux-headers-*.deb' -o -name 'linux-kbuild-*.deb' \) \
-        ! -name '*[-_]rt[-_]*' ! -name '*[-_]rt[0-9]*' \
-        ! -name '*[-_]cloud[-_]*' ! -name '*[-_]cloud[0-9]*' \
-        ! -name '*realtime*' -print | sort)
+        -o -name 'linux-headers-*.deb' -o -name 'linux-kbuild-*.deb' \) -print | sort)
     [ "${FOUND}" = true ] || return 1
     KERNEL_UPDATE_POLICY=frozen
     : >"${REPOSITORY_TABLE}"
@@ -299,10 +285,9 @@ collect_package_paths() {
 
         RELPATH="${PATHNAME#"${ROOT}"}"
         
-        # ปรับการจัดกลุ่ม Usr-Merge ทุกรูปแบบใน Debian/Ubuntu
         if [[ "${RELPATH}" == "/lib/modules/"* ]]; then
             RELPATH="/usr/lib/modules/${RELPATH#/lib/modules/}"
-        elif [[ "${RELPATH}" == "/lib/"* ]]; then
+        elif [[ "${RELPATH}" == "/lib/"* ]] && [[ "${RELPATH}" != "/lib/modules/"* ]]; then
             RELPATH="/usr/lib/${RELPATH#/lib/}"
         fi
         
@@ -361,11 +346,6 @@ analyze_packages() {
         dpkg-deb -x "${DEB}" "${ROOT}"
         dpkg-deb -e "${DEB}" "${CONTROL}"
         NAME="$(dpkg-deb -f "${DEB}" Package)"
-
-        if [[ "${NAME}" =~ [-_]rt([-_]|[0-9]) ]] || [[ "${NAME}" =~ [-_]cloud([-_]|[0-9]) ]] || [[ "${NAME}" == *realtime* ]]; then
-            continue
-        fi
-
         VERSION="$(dpkg-deb -f "${DEB}" Version)"
         ARCH="$(dpkg-deb -f "${DEB}" Architecture)"
         [ "${ARCH}" = all ] || [ "${ARCH}" = "${KERNEL_APT_ARCH}" ] ||
@@ -455,17 +435,16 @@ validate_kernel_closure() {
         done
     fi
 
-    # สร้างการทำ Compatibility Link ให้กับ Build Script ภายนอกที่คาดหวังไฟล์ใน /boot
-    if [ ! -f "/boot/vmlinuz-${KERNEL_VERSION}" ]; then
-        if [ -f "${KERNEL_PATH}" ]; then
-            ln -sf "${KERNEL_PATH}" "/boot/vmlinuz-${KERNEL_VERSION}"
-        fi
+    if [ -f "${KERNEL_PATH}" ] && [ "${KERNEL_PATH}" != "/boot/vmlinuz-${KERNEL_VERSION}" ]; then
+        cp -af "${KERNEL_PATH}" "/boot/vmlinuz-${KERNEL_VERSION}"
     fi
-    if [ ! -f "/boot/config-${KERNEL_VERSION}" ] && [ -f "${CONFIG}" ]; then
-        ln -sf "${CONFIG}" "/boot/config-${KERNEL_VERSION}"
+
+    if [ -f "${CONFIG}" ] && [ "${CONFIG}" != "/boot/config-${KERNEL_VERSION}" ]; then
+        cp -af "${CONFIG}" "/boot/config-${KERNEL_VERSION}"
     fi
-    if [ ! -f "/boot/System.map-${KERNEL_VERSION}" ] && [ -f "${SYSTEM_MAP}" ]; then
-        ln -sf "${SYSTEM_MAP}" "/boot/System.map-${KERNEL_VERSION}"
+
+    if [ -f "${SYSTEM_MAP}" ] && [ "${SYSTEM_MAP}" != "/boot/System.map-${KERNEL_VERSION}" ]; then
+        cp -af "${SYSTEM_MAP}" "/boot/System.map-${KERNEL_VERSION}"
     fi
 }
 
@@ -474,22 +453,24 @@ decompress_modules() {
 
     while IFS= read -r FILE; do
         [ -f "${FILE}" ] || continue
+        
         OUTPUT="${FILE%.xz}"
         xz -dc "${FILE}" >"${OUTPUT}.tmp"
         chmod --reference="${FILE}" "${OUTPUT}.tmp"
         mv "${OUTPUT}.tmp" "${OUTPUT}"
         rm -f "${FILE}"
-    done < <(find /lib/modules /usr/lib/modules -type f -name '*.ko.xz' -print 2>/dev/null)
-
+    done < <(find /lib/modules /usr/lib/modules -type f -name '*.ko.xz' 2>/dev/null)
+    
     while IFS= read -r FILE; do
         [ -f "${FILE}" ] || continue
+        
         OUTPUT="${FILE%.zst}"
         zstd -q -d -c "${FILE}" >"${OUTPUT}.tmp"
         chmod --reference="${FILE}" "${OUTPUT}.tmp"
         mv "${OUTPUT}.tmp" "${OUTPUT}"
         rm -f "${FILE}"
-    done < <(find /lib/modules /usr/lib/modules -type f -name '*.ko.zst' -print 2>/dev/null)
-
+    done < <(find /lib/modules /usr/lib/modules -type f -name '*.ko.zst' 2>/dev/null)
+    
     depmod -b / "${KERNEL_VERSION}"
 }
 
@@ -510,14 +491,11 @@ write_package_metadata() {
     mkdir -p "${STATUS_DIR}" "${INFO_DIR}" "${PAYLOAD_DIR}"
     : >"${WORK}/package-fragments"
     while IFS=$'\t' read -r DEB NAME VERSION ARCH SOURCE HASH ROLE INSTANCE ROOT CONTROL; do
-        if [[ "${NAME}" =~ [-_]rt([-_]|[0-9]) ]] || [[ "${NAME}" =~ [-_]cloud([-_]|[0-9]) ]] || [[ "${NAME}" == *realtime* ]]; then
-            continue
-        fi
-
         PATHS="${ROOT%/payload}/paths"
-        [ -f "${PATHS}" ] || continue
+        # Private APT downloads transient dependencies to validate and materialize
+        # the kernel closure. Native deployment installs its own target toolchain;
+        # only packages represented by the materialized kernel payload are locked.
         [ "${ROLE}" != dependency ] || continue
-        
         {
             dpkg-deb -f "${DEB}" | sed '1a Status: install ok installed'
             printf '\n'
@@ -538,7 +516,7 @@ write_package_metadata() {
                 while IFS= read -r PATHNAME; do
                     [ -n "${PATHNAME}" ] || continue
                     FINAL="$(final_path "${PATHNAME}")"
-                    [ -e "${FINAL}" ] || [ -L "${FINAL}" ] || continue
+                    [ -e "${FINAL}" ] || [ -L "${FINAL}" ] || fail "Final kernel payload is missing: ${FINAL}"
                     printf '%s\n' "${FINAL}" >>"${INFO_DIR}/${INSTANCE}.list"
                     if [ -f "${FINAL}" ] && [ ! -L "${FINAL}" ]; then
                         md5sum "${FINAL}" | sed "s#  ${FINAL}#  ${FINAL#/}#" >>"${INFO_DIR}/${INSTANCE}.md5sums"
@@ -664,6 +642,8 @@ write_manifest() {
         printf '  "userspace": {"family": "%s", "suite": "' "${DISTRIBUTION_PROFILE}"
         json_escape "${DISTRIBUTION}"
         printf '", "dpkg_architecture": "%s"},\n' "${DISTRIBUTION_ARCH}"
+        # format-1 kernel metadata is consumed by minios-installer with an exact
+        # schema. KERNEL_PROVIDER belongs to the build-time kernel.lock only.
         printf '  "kernel": {"distribution": "'
         json_escape "${KERNEL_SOURCE_SUITE}"
         printf '", "version": "'
