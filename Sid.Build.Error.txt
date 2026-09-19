@@ -1,0 +1,137 @@
+## Critical Functions That Could Break Debian Sid Kernel v7.2.x Build
+
+I've analyzed the MiniOS kernel acquisition script. Here are the **main functions that could cause build failures** with Debian Sid kernel v7.2.x:
+
+---
+
+## Key Breaking Functions
+
+| Function | Risk Level | Failure Mode | Debian Sid Impact |
+|----------|-----------|--------------|-------------------|
+| **`validate_kernel_closure()`** | **CRITICAL** | Missing CONFIG_EFI_STUB=y or split kernel layout mismatch | Sid's newer kernels may change config structure |
+| **`resolve_ubuntu_kernel_payload_requests()`** | **HIGH** | Triggered only for Ubuntu; relies on tracking metapackage structure | N/A for Debian Sid, but important to understand |
+| **`decompress_modules()`** | **HIGH** | Fails if .ko.xz/.ko.zst decompression breaks or depmod fails | Sid v7.2.x may use different compression; depmod version compatibility issue |
+| **`download_packages()`** | **MEDIUM** | APT closure resolution fails if dependency graph changes | Sid's rapid updates may break APT closure calculation |
+| **`analyze_packages()`** | **MEDIUM** | Package classification fails if Debian changes linux-* naming scheme | Risk if Debian adopts new package naming |
+| **`classify_package()`** | **HIGH** | Mis-classifies packages if file structure changes (e.g., vmlinuz path, modules location) | Sid could relocate kernel files or modules |
+
+---
+
+## Most Critical Issue: `validate_kernel_closure()`
+
+This function has the **hardest constraints**:
+
+```bash
+grep -q '^CONFIG_EFI_STUB=y$' "${CONFIG}" || fail "Selected kernel lacks CONFIG_EFI_STUB=y"
+```
+
+**Problem with Debian Sid v7.2.x:**
+- **Sid is rolling**, kernel configs change frequently
+- **v7.2.x is very recent** (May 2026 era) — Sid might use significantly different defaults
+- **EFI_STUB** requirement is strict — if Sid's kernel disables it or changes config format, build **immediately fails**
+
+---
+
+## Second Critical Issue: `decompress_modules()`
+
+```bash
+find "${MODULES_ROOT}" -type f -name '*.ko.xz' -print 2>/dev/null
+find "${MODULES_ROOT}" -type f -name '*.ko.zst' -print 2>/dev/null
+depmod -b / "${KERNEL_VERSION}"
+```
+
+**Problems:**
+1. **Sid v7.2.x might use different compression** — xz/zst may not be the only format
+2. **depmod version mismatch** — your build system's depmod version may not match the kernel's ABI
+3. **Module signature checking** — newer Sid kernels enforce module signing that depmod doesn't validate
+4. **Symlink issues** — Debian Sid changed `/lib` → `/usr/lib` symlink defaults; `find` may fail
+
+---
+
+## Recommended Fixes for Debian Sid v7.2.x
+
+### 1. **Patch `validate_kernel_closure()` to be more lenient:**
+
+```bash
+validate_kernel_closure() {
+  # ... existing code ...
+  
+  # More flexible EFI check for Sid rolling releases
+  if ! grep -q '^CONFIG_EFI_STUB=y$' "${CONFIG}"; then
+    warning "Kernel lacks CONFIG_EFI_STUB=y — this may cause EFI boot issues"
+    # Continue instead of failing for Sid's experimental configs
+  fi
+}
+```
+
+### 2. **Update `decompress_modules()` for newer compression:**
+
+```bash
+decompress_modules() {
+  local FILE OUTPUT MODULES_ROOT
+  
+  if [ -L /lib ]; then
+    MODULES_ROOT=/usr/lib/modules
+  else
+    MODULES_ROOT=/lib/modules
+  fi
+  
+  # Handle xz compression
+  while IFS= read -r FILE; do
+    xz -dc "${FILE}" >"${OUTPUT}.tmp" || fail "xz decompression failed: ${FILE}"
+    chmod --reference="${FILE}" "${OUTPUT}.tmp"
+    mv "${OUTPUT}.tmp" "${OUTPUT}"
+    rm -f "${FILE}"
+  done < <(find "${MODULES_ROOT}" -type f -name '*.ko.xz' -print 2>/dev/null)
+  
+  # Handle zstd compression  
+  while IFS= read -r FILE; do
+    zstd -q -d -c "${FILE}" >"${OUTPUT}.tmp" || fail "zstd decompression failed: ${FILE}"
+    chmod --reference="${FILE}" "${OUTPUT}.tmp"
+    mv "${OUTPUT}.tmp" "${OUTPUT}"
+    rm -f "${FILE}"
+  done < <(find "${MODULES_ROOT}" -type f -name '*.ko.zst' -print 2>/dev/null)
+  
+  # Run depmod with error handling
+  depmod -b / "${KERNEL_VERSION}" || {
+    warning "depmod returned non-zero status — kernel modules may not be fully indexed"
+    # Don't fail; newer Sid kernels may handle this differently
+  }
+}
+```
+
+### 3. **Make `classify_package()` more robust:**
+
+```bash
+classify_package() {
+  local NAME="$1"
+  local ROOT="$2"
+  
+  # ... existing code ...
+  
+  elif [[ "${NAME}" == linux-binary-* ]]; then
+    # Sid might move vmlinuz to different paths
+    if package_has "${ROOT}" '*/boot/vmlinuz-*' || \
+       package_has "${ROOT}" '*/vmlinuz-*'; then
+      printf '%s\n' binary
+    else
+      fail "binary package has no vmlinuz: ${NAME}"
+    fi
+  
+  # ... rest of logic ...
+}
+```
+
+---
+
+## Summary
+
+**Follow these functions in this order to debug Debian Sid v7.2.x:**
+
+1. **`validate_kernel_closure()`** — Check if CONFIG_EFI_STUB exists; if not, relax the requirement
+2. **`download_packages()`** — Verify APT resolves the closure without missing dependencies
+3. **`analyze_packages()`** — Ensure packages are correctly classified
+4. **`decompress_modules()`** — Test xz/zstd decompression and depmod compatibility
+5. **`classify_package()`** — Validate file paths haven't changed in Sid's layout
+
+The **most likely failure point is `validate_kernel_closure()`** due to Sid's rolling-release nature and v7.2.x being very recent.
