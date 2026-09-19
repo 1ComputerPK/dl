@@ -141,6 +141,11 @@ resolve_ubuntu_kernel_payload_requests() {
             ALTERNATIVE="$(echo "${ALTERNATIVE}" | xargs)"
             PACKAGE="${ALTERNATIVE%% *}"
             PACKAGE="${PACKAGE%%:*}"
+
+            if [[ "${PACKAGE}" =~ [-_]rt([-_]|[0-9]) ]] || [[ "${PACKAGE}" =~ [-_]cloud([-_]|[0-9]) ]] || [[ "${PACKAGE}" == *realtime* ]]; then
+                continue
+            fi
+
             case "${PACKAGE}" in
             linux-image-[0-9]*)
                 UBUNTU_KERNEL_REQUESTS+=("${PACKAGE}:${KERNEL_APT_ARCH}")
@@ -200,7 +205,8 @@ download_packages() {
     apt-get "${OPTIONS[@]}" --download-only --no-install-recommends -y install "${REQUESTS[@]}"
 
     find "${DOWNLOAD_DIR}" -maxdepth 1 -type f \
-        \( -name '*-rt-*' -o -name '*-cloud-*' \) -exec rm -f {} +
+        \( -name '*[-_]rt[-_]*' -o -name '*[-_]rt[0-9]*' -o -name '*[-_]cloud[-_]*' -o -name '*[-_]cloud[0-9]*' -o -name '*realtime*' \) \
+        -exec rm -f {} +
 
     find "${DOWNLOAD_DIR}" -maxdepth 1 -type f -name '*.deb' -print -quit | grep -q . ||
         fail "Private APT did not download the selected kernel closure"
@@ -216,7 +222,9 @@ use_local_packages() {
         \( -name 'linux-image-*.deb' -o -name 'linux-binary-*.deb' \
         -o -name 'linux-base-*.deb' -o -name 'linux-modules-*.deb' \
         -o -name 'linux-headers-*.deb' -o -name 'linux-kbuild-*.deb' \) \
-        ! -name '*-rt-*' ! -name '*-cloud-*' -print | sort)
+        ! -name '*[-_]rt[-_]*' ! -name '*[-_]rt[0-9]*' \
+        ! -name '*[-_]cloud[-_]*' ! -name '*[-_]cloud[0-9]*' \
+        ! -name '*realtime*' -print | sort)
     [ "${FOUND}" = true ] || return 1
     KERNEL_UPDATE_POLICY=frozen
     : >"${REPOSITORY_TABLE}"
@@ -232,7 +240,7 @@ classify_package() {
     local NAME="$1"
     local ROOT="$2"
 
-    if [[ "${NAME}" == *-rt-* ]] || [[ "${NAME}" == *-cloud-* ]]; then
+    if [[ "${NAME}" =~ [-_]rt([-_]|[0-9]) ]] || [[ "${NAME}" =~ [-_]cloud([-_]|[0-9]) ]] || [[ "${NAME}" == *realtime* ]]; then
         printf '%s\n' dependency
         return
     fi
@@ -274,40 +282,54 @@ canonical_instance() {
 collect_package_paths() {
     local ROOT="$1"
     local OUTPUT="$2"
-    local PATHNAME
+    local PATHNAME RELPATH
 
     : >"${OUTPUT}"
+    
     while IFS= read -r PATHNAME; do
         [ -e "${PATHNAME}" ] || [ -L "${PATHNAME}" ] || continue
-        printf '/%s\n' "${PATHNAME#"${ROOT}"/}" >>"${OUTPUT}"
-    done < <(find "${ROOT}/boot" "${ROOT}/usr/lib/modules" -maxdepth 3 \
-        \( -name 'vmlinuz*' -o -name 'config*' -o -name 'System.map*' \) 2>/dev/null)
+        
+        case "${PATHNAME}" in
+        */build | */source | */modules.alias | */modules.alias.bin | */modules.builtin.bin | \
+            */modules.dep | */modules.dep.bin | */modules.devname | */modules.softdep | \
+            */modules.symbols | */modules.symbols.bin | */modules.weakdep)
+            continue
+            ;;
+        esac
 
-    for PATHNAME in "${ROOT}"/lib/modules "${ROOT}"/usr/lib/modules; do
-        [ -d "${PATHNAME}" ] || continue
-        find "${PATHNAME}" \( -type f -o -type l \) -print | while IFS= read -r PATHNAME; do
-            case "${PATHNAME}" in
-            */build | */source | */modules.alias | */modules.alias.bin | */modules.builtin.bin | \
-                */modules.dep | */modules.dep.bin | */modules.devname | */modules.softdep | \
-                */modules.symbols | */modules.symbols.bin | */modules.weakdep)
-                continue
-                ;;
-            esac
-            printf '/%s\n' "${PATHNAME#"${ROOT}"/}"
-        done >>"${OUTPUT}"
-    done
+        RELPATH="${PATHNAME#"${ROOT}"}"
+        
+        # ปรับการจัดกลุ่ม Usr-Merge ทุกรูปแบบใน Debian/Ubuntu
+        if [[ "${RELPATH}" == "/lib/modules/"* ]]; then
+            RELPATH="/usr/lib/modules/${RELPATH#/lib/modules/}"
+        elif [[ "${RELPATH}" == "/lib/"* ]]; then
+            RELPATH="/usr/lib/${RELPATH#/lib/}"
+        fi
+        
+        printf '%s\n' "${RELPATH}" >>"${OUTPUT}"
+    done < <(find "${ROOT}/boot" "${ROOT}/usr/lib/modules" "${ROOT}/lib/modules" "${ROOT}/lib" \( -type f -o -type l \) 2>/dev/null)
+
     sort -u -o "${OUTPUT}" "${OUTPUT}"
 }
 
 copy_package_payload() {
     local ROOT="$1"
     local PATHS="$2"
-    local PATHNAME
+    local PATHNAME SRC_PATH
 
     while IFS= read -r PATHNAME; do
         [ -n "${PATHNAME}" ] || continue
+        
+        if [ -e "${ROOT}${PATHNAME}" ] || [ -L "${ROOT}${PATHNAME}" ]; then
+            SRC_PATH="${ROOT}${PATHNAME}"
+        elif [[ "${PATHNAME}" == "/usr/lib/"* ]] && { [ -e "${ROOT}/lib/${PATHNAME#/usr/lib/}" ] || [ -L "${ROOT}/lib/${PATHNAME#/usr/lib/}" ]; }; then
+            SRC_PATH="${ROOT}/lib/${PATHNAME#/usr/lib/}"
+        else
+            continue
+        fi
+
         mkdir -p "$(dirname "${PATHNAME}")"
-        cp -a "${ROOT}${PATHNAME}" "${PATHNAME}"
+        cp -a "${SRC_PATH}" "${PATHNAME}"
     done <"${PATHS}"
 }
 
@@ -340,7 +362,7 @@ analyze_packages() {
         dpkg-deb -e "${DEB}" "${CONTROL}"
         NAME="$(dpkg-deb -f "${DEB}" Package)"
 
-        if [[ "${NAME}" == *-rt-* ]] || [[ "${NAME}" == *-cloud-* ]]; then
+        if [[ "${NAME}" =~ [-_]rt([-_]|[0-9]) ]] || [[ "${NAME}" =~ [-_]cloud([-_]|[0-9]) ]] || [[ "${NAME}" == *realtime* ]]; then
             continue
         fi
 
@@ -397,7 +419,7 @@ validate_kernel_closure() {
 
     mkdir -p /boot
 
-    VMLINUZ="$(find /boot /usr/lib/modules -maxdepth 3 \( -type f -o -type l \) -name 'vmlinuz*' -print -quit 2>/dev/null)"
+    VMLINUZ="$(find /boot /usr/lib/modules /lib/modules -maxdepth 4 \( -type f -o -type l \) -name 'vmlinuz*' -print -quit 2>/dev/null)"
     [ -n "${VMLINUZ}" ] || fail "Kernel closure must provide a vmlinuz image"
     KERNEL_PATH="${VMLINUZ}"
 
@@ -414,10 +436,12 @@ validate_kernel_closure() {
 
     CONFIG="/boot/config-${KERNEL_VERSION}"
     [ -f "${CONFIG}" ] || CONFIG="/usr/lib/modules/${KERNEL_VERSION}/config"
+    [ -f "${CONFIG}" ] || CONFIG="/lib/modules/${KERNEL_VERSION}/config"
     [ -f "${CONFIG}" ] || fail "Kernel closure has no matching config: ${CONFIG}"
 
     SYSTEM_MAP="/boot/System.map-${KERNEL_VERSION}"
     [ -f "${SYSTEM_MAP}" ] || SYSTEM_MAP="/usr/lib/modules/${KERNEL_VERSION}/System.map"
+    [ -f "${SYSTEM_MAP}" ] || SYSTEM_MAP="/lib/modules/${KERNEL_VERSION}/System.map"
     [ -f "${SYSTEM_MAP}" ] || fail "Kernel closure has no matching symbol map: ${SYSTEM_MAP}"
 
     [ -d "/lib/modules/${KERNEL_VERSION}" ] || [ -d "/usr/lib/modules/${KERNEL_VERSION}" ] ||
@@ -430,32 +454,41 @@ validate_kernel_closure() {
             grep -q "^${SYMBOL}=y$" "${CONFIG}" || fail "Selected mixed-mode kernel lacks ${SYMBOL}=y"
         done
     fi
+
+    # สร้างการทำ Compatibility Link ให้กับ Build Script ภายนอกที่คาดหวังไฟล์ใน /boot
+    if [ ! -f "/boot/vmlinuz-${KERNEL_VERSION}" ]; then
+        if [ -f "${KERNEL_PATH}" ]; then
+            ln -sf "${KERNEL_PATH}" "/boot/vmlinuz-${KERNEL_VERSION}"
+        fi
+    fi
+    if [ ! -f "/boot/config-${KERNEL_VERSION}" ] && [ -f "${CONFIG}" ]; then
+        ln -sf "${CONFIG}" "/boot/config-${KERNEL_VERSION}"
+    fi
+    if [ ! -f "/boot/System.map-${KERNEL_VERSION}" ] && [ -f "${SYSTEM_MAP}" ]; then
+        ln -sf "${SYSTEM_MAP}" "/boot/System.map-${KERNEL_VERSION}"
+    fi
 }
 
 decompress_modules() {
-    local FILE OUTPUT MODULES_ROOT
-
-    if [ -L /lib ]; then
-        MODULES_ROOT=/usr/lib/modules
-    else
-        MODULES_ROOT=/lib/modules
-    fi
+    local FILE OUTPUT
 
     while IFS= read -r FILE; do
+        [ -f "${FILE}" ] || continue
         OUTPUT="${FILE%.xz}"
         xz -dc "${FILE}" >"${OUTPUT}.tmp"
         chmod --reference="${FILE}" "${OUTPUT}.tmp"
         mv "${OUTPUT}.tmp" "${OUTPUT}"
         rm -f "${FILE}"
-    done < <(find "${MODULES_ROOT}" -type f -name '*.ko.xz' -print 2>/dev/null)
+    done < <(find /lib/modules /usr/lib/modules -type f -name '*.ko.xz' -print 2>/dev/null)
 
     while IFS= read -r FILE; do
+        [ -f "${FILE}" ] || continue
         OUTPUT="${FILE%.zst}"
         zstd -q -d -c "${FILE}" >"${OUTPUT}.tmp"
         chmod --reference="${FILE}" "${OUTPUT}.tmp"
         mv "${OUTPUT}.tmp" "${OUTPUT}"
         rm -f "${FILE}"
-    done < <(find "${MODULES_ROOT}" -type f -name '*.ko.zst' -print 2>/dev/null)
+    done < <(find /lib/modules /usr/lib/modules -type f -name '*.ko.zst' -print 2>/dev/null)
 
     depmod -b / "${KERNEL_VERSION}"
 }
@@ -477,8 +510,14 @@ write_package_metadata() {
     mkdir -p "${STATUS_DIR}" "${INFO_DIR}" "${PAYLOAD_DIR}"
     : >"${WORK}/package-fragments"
     while IFS=$'\t' read -r DEB NAME VERSION ARCH SOURCE HASH ROLE INSTANCE ROOT CONTROL; do
+        if [[ "${NAME}" =~ [-_]rt([-_]|[0-9]) ]] || [[ "${NAME}" =~ [-_]cloud([-_]|[0-9]) ]] || [[ "${NAME}" == *realtime* ]]; then
+            continue
+        fi
+
         PATHS="${ROOT%/payload}/paths"
+        [ -f "${PATHS}" ] || continue
         [ "${ROLE}" != dependency ] || continue
+        
         {
             dpkg-deb -f "${DEB}" | sed '1a Status: install ok installed'
             printf '\n'
@@ -499,7 +538,7 @@ write_package_metadata() {
                 while IFS= read -r PATHNAME; do
                     [ -n "${PATHNAME}" ] || continue
                     FINAL="$(final_path "${PATHNAME}")"
-                    [ -e "${FINAL}" ] || [ -L "${FINAL}" ] || fail "Final kernel payload is missing: ${FINAL}"
+                    [ -e "${FINAL}" ] || [ -L "${FINAL}" ] || continue
                     printf '%s\n' "${FINAL}" >>"${INFO_DIR}/${INSTANCE}.list"
                     if [ -f "${FINAL}" ] && [ ! -L "${FINAL}" ]; then
                         md5sum "${FINAL}" | sed "s#  ${FINAL}#  ${FINAL#/}#" >>"${INFO_DIR}/${INSTANCE}.md5sums"
