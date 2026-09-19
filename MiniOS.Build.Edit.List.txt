@@ -8,7 +8,7 @@ sudo systemctl restart udisks2.service
 
 #/linux-live/initramfs/dracut-mos/90minios/module-setup.sh
 
-#edit :
+#edit : add f2fs
 
 install_bundled_crypt() {
     local payload=$1 manifest="$1/../buildroot/crypt_payload.sha256" path
@@ -168,9 +168,9 @@ configfile /minios/boot/grub/1compk.cfg
         "iso9660.mod" "udf.mod" "fat.mod" "ext2.mod" "btrfs.mod" "f2fs.mod" "xfs.mod" "ntfs.mod" "exfat.mod"
 
 
-            iso9660 udf fat ext2 btrfs xfs f2fs ntfs exfat \
+            iso9660 udf fat ext2 btrfs f2fs xfs ntfs exfat \
 
-            iso9660 udf fat ext2 btrfs xfs f2fs ntfs exfat \
+            iso9660 udf fat ext2 btrfs f2fs xfs ntfs exfat \
 
 
 #edit :
