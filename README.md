@@ -1,4 +1,4 @@
-<img width="1280" height="720" alt="MiniOS.SkyLine.2026" src="https://github.com/1compk/dl/raw/dl/MiniOS.SkyLine.2026.Trixie.LXFice.SS.RV413.png"/>
+<img width="1280" height="720" alt="MiniOS.SkyLine.2026" src="https://github.com/1compk/dl/raw/dl/MiniOS.SkyLine.2026.Trixie.LXFice.v7.2.6.SS.RV413.png"/>
 
 MiniOS Download : https://github.com/1compk/minios/releases
 
