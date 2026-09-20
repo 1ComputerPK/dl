@@ -119,7 +119,7 @@ set timeout=5
 search --set -f 
 
 
-#add :
+#add : usbcore.autosuspend=-1 pcie_aspm=off sysctl.vm.dirty_background_bytes=16777216 sysctl.vm.dirty_bytes=50331648
 
 set loading=\$"Loading kernel and ramdisk..."
 set choosesessiondisk=\$"Choose session disk during startup"
@@ -132,7 +132,7 @@ menuentry "\$choosesessiondisk" --class switchdisk {
     echo \$loading
     search --set -f /${LIVEKITNAME}/boot/${VMLINUZNAME}
     set gfxpayload=\$gfxpayload
-    linux /${LIVEKITNAME}/boot/${VMLINUZNAME} ${DEFAULT_SETTINGS} ${BOOT_SETTINGS} perchdir=askdisk locales=\$lang_utf \$extra_params
+    linux /${LIVEKITNAME}/boot/${VMLINUZNAME} ${DEFAULT_SETTINGS} ${BOOT_SETTINGS} perchdir=askdisk locales=\$lang_utf \$extra_params usbcore.autosuspend=-1 pcie_aspm=off sysctl.vm.dirty_background_bytes=16777216 sysctl.vm.dirty_bytes=50331648
     initrd /${LIVEKITNAME}/boot/${INITRFSNAME}
 }
 menuentry "\$ZeR09" --class ZeR09 {
@@ -150,7 +150,7 @@ menuentry "Choose session disk during startup" --class switchdisk {
     echo \$message
     search --set -f /${LIVEKITNAME}/boot/${VMLINUZNAME}
     set gfxpayload=\$gfxpayload
-    linux /${LIVEKITNAME}/boot/${VMLINUZNAME} ${DEFAULT_SETTINGS} ${BOOT_SETTINGS} perchdir=askdisk
+    linux /${LIVEKITNAME}/boot/${VMLINUZNAME} ${DEFAULT_SETTINGS} ${BOOT_SETTINGS} perchdir=askdisk usbcore.autosuspend=-1 pcie_aspm=off sysctl.vm.dirty_background_bytes=16777216 sysctl.vm.dirty_bytes=50331648
     initrd /${LIVEKITNAME}/boot/${INITRFSNAME}
 }
 menuentry "1Computer.PK Grub Boot Menu" --class ZeR09 {
