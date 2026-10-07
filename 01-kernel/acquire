@@ -222,14 +222,25 @@ package_has() {
     find "${ROOT}" -path "${PATTERN}" -print -quit 2>/dev/null | grep -q .
 }
 
+relocate_modules_dir_boot_files() {
+    local ROOT="$1"
+    local FILE NAME RELEASE
+
+    for FILE in "${ROOT}"/usr/lib/modules/*/vmlinuz "${ROOT}"/usr/lib/modules/*/config \
+        "${ROOT}"/usr/lib/modules/*/System.map; do
+        [ -f "${FILE}" ] && [ ! -L "${FILE}" ] || continue
+        NAME="${FILE##*/}"
+        RELEASE="${FILE%/*}"
+        RELEASE="${RELEASE##*/}"
+        [ ! -e "${ROOT}/boot/${NAME}-${RELEASE}" ] || fail "Kernel payload ships ${NAME} in both /boot and /usr/lib/modules"
+        mkdir -p "${ROOT}/boot"
+        mv "${FILE}" "${ROOT}/boot/${NAME}-${RELEASE}"
+    done
+}
+
 classify_package() {
     local NAME="$1"
     local ROOT="$2"
-
-    if [[ "${NAME}" =~ [-_]rt([-_]|[0-9]) ]] || [[ "${NAME}" =~ [-_]cloud([-_]|[0-9]) ]] || [[ "${NAME}" == *realtime* ]]; then
-        printf '%s\n' dependency
-        return
-    fi
 
     if [ "${NAME}" = "${KERNEL_METAPACKAGE}" ]; then
         printf '%s\n' tracking-meta
@@ -240,10 +251,10 @@ classify_package() {
         package_has "${ROOT}" '*/modules/*/*.ko*' || fail "modules package has no modules: ${NAME}"
         printf '%s\n' modules
     elif [[ "${NAME}" == linux-binary-* ]]; then
-        package_has "${ROOT}" '*/boot/vmlinuz-*' || package_has "${ROOT}" '*/usr/lib/modules/*/vmlinuz' || fail "binary package has no vmlinuz: ${NAME}"
+        package_has "${ROOT}" '*/boot/vmlinuz-*' || fail "binary package has no vmlinuz: ${NAME}"
         printf '%s\n' binary
     elif [[ "${NAME}" == linux-base-* ]]; then
-        if package_has "${ROOT}" '*/boot/config-*' || package_has "${ROOT}" '*/usr/lib/modules/*/config'; then
+        if package_has "${ROOT}" '*/boot/config-*'; then
             printf '%s\n' base
         else
             printf '%s\n' base-meta
@@ -268,53 +279,38 @@ canonical_instance() {
 collect_package_paths() {
     local ROOT="$1"
     local OUTPUT="$2"
-    local PATHNAME RELPATH
+    local PATHNAME
 
     : >"${OUTPUT}"
-    
-    while IFS= read -r PATHNAME; do
+    for PATHNAME in "${ROOT}"/boot/vmlinuz-* "${ROOT}"/boot/config-* "${ROOT}"/boot/System.map-*; do
         [ -e "${PATHNAME}" ] || [ -L "${PATHNAME}" ] || continue
-        
-        case "${PATHNAME}" in
-        */build | */source | */modules.alias | */modules.alias.bin | */modules.builtin.bin | \
-            */modules.dep | */modules.dep.bin | */modules.devname | */modules.softdep | \
-            */modules.symbols | */modules.symbols.bin | */modules.weakdep)
-            continue
-            ;;
-        esac
-
-        RELPATH="${PATHNAME#"${ROOT}"}"
-        
-        if [[ "${RELPATH}" == "/lib/modules/"* ]]; then
-            RELPATH="/usr/lib/modules/${RELPATH#/lib/modules/}"
-        elif [[ "${RELPATH}" == "/lib/"* ]] && [[ "${RELPATH}" != "/lib/modules/"* ]]; then
-            RELPATH="/usr/lib/${RELPATH#/lib/}"
-        fi
-        
-        printf '%s\n' "${RELPATH}" >>"${OUTPUT}"
-    done < <(find "${ROOT}/boot" "${ROOT}/usr/lib/modules" "${ROOT}/lib/modules" "${ROOT}/lib" \( -type f -o -type l \) 2>/dev/null)
-
+        printf '/%s\n' "${PATHNAME#"${ROOT}"/}" >>"${OUTPUT}"
+    done
+    for PATHNAME in "${ROOT}"/lib/modules "${ROOT}"/usr/lib/modules; do
+        [ -d "${PATHNAME}" ] || continue
+        find "${PATHNAME}" \( -type f -o -type l \) -print | while IFS= read -r PATHNAME; do
+            case "${PATHNAME}" in
+            */build | */source | */modules.alias | */modules.alias.bin | */modules.builtin.bin | \
+                */modules.dep | */modules.dep.bin | */modules.devname | */modules.softdep | \
+                */modules.symbols | */modules.symbols.bin | */modules.weakdep)
+                continue
+                ;;
+            esac
+            printf '/%s\n' "${PATHNAME#"${ROOT}"/}"
+        done >>"${OUTPUT}"
+    done
     sort -u -o "${OUTPUT}" "${OUTPUT}"
 }
 
 copy_package_payload() {
     local ROOT="$1"
     local PATHS="$2"
-    local PATHNAME SRC_PATH
+    local PATHNAME
 
     while IFS= read -r PATHNAME; do
         [ -n "${PATHNAME}" ] || continue
-        
-        if [ -e "${ROOT}${PATHNAME}" ] || [ -L "${ROOT}${PATHNAME}" ]; then
-            SRC_PATH="${ROOT}${PATHNAME}"
-        elif [[ "${PATHNAME}" == "/usr/lib/"* ]] && { [ -e "${ROOT}/lib/${PATHNAME#/usr/lib/}" ] || [ -L "${ROOT}/lib/${PATHNAME#/usr/lib/}" ]; }; then
-            SRC_PATH="${ROOT}/lib/${PATHNAME#/usr/lib/}"
-        else
-            continue
-        fi
-
         mkdir -p "$(dirname "${PATHNAME}")"
-        cp -a "${SRC_PATH}" "${PATHNAME}"
+        cp -a "${ROOT}${PATHNAME}" "${PATHNAME}"
     done <"${PATHS}"
 }
 
@@ -345,6 +341,7 @@ analyze_packages() {
         mkdir -p "${ROOT}" "${CONTROL}"
         dpkg-deb -x "${DEB}" "${ROOT}"
         dpkg-deb -e "${DEB}" "${CONTROL}"
+        relocate_modules_dir_boot_files "${ROOT}"
         NAME="$(dpkg-deb -f "${DEB}" Package)"
         VERSION="$(dpkg-deb -f "${DEB}" Version)"
         ARCH="$(dpkg-deb -f "${DEB}" Architecture)"
@@ -387,90 +384,55 @@ validate_kernel_closure() {
     BINARY="$(cut -f7 "${PACKAGE_TABLE}" | grep -c '^binary$' || true)"
     BASE="$(cut -f7 "${PACKAGE_TABLE}" | grep -c '^base$' || true)"
     MODULES="$(cut -f7 "${PACKAGE_TABLE}" | grep -c '^modules$' || true)"
-
     [ "${KERNEL_UPDATE_POLICY}" != track ] || [ "${TRACKING}" -eq 1 ] || fail "Tracked kernel requires one tracking metapackage"
-    [ "${IMAGE}" -ge 1 ] || fail "Kernel closure requires at least one image package"
-
-    if [ "${BINARY}" -gt 0 ]; then
-        if [ "${MODULES}" -lt 1 ]; then
-            fail "Debian split kernel closure is incomplete (missing modules)"
+    [ "${IMAGE}" -eq 1 ] || fail "Kernel closure requires exactly one image package"
+    if [ "${BINARY}" -gt 0 ] || [ "${BASE}" -gt 0 ]; then
+        if [ "${BINARY}" -ne 1 ] || [ "${BASE}" -ne 1 ] || [ "${MODULES}" -ne 1 ]; then
+            fail "Debian split kernel closure is incomplete"
         fi
     fi
 
-    mkdir -p /boot
-
-    VMLINUZ="$(find /boot /usr/lib/modules /lib/modules -maxdepth 4 \( -type f -o -type l \) -name 'vmlinuz*' -print -quit 2>/dev/null)"
-    [ -n "${VMLINUZ}" ] || fail "Kernel closure must provide a vmlinuz image"
+    VMLINUZ="$(find /boot -maxdepth 1 -type f -name 'vmlinuz-*' -print)"
+    [ "$(printf '%s\n' "${VMLINUZ}" | grep -c .)" -eq 1 ] || fail "Kernel closure must provide exactly one vmlinuz"
     KERNEL_PATH="${VMLINUZ}"
-
-    if [[ "${KERNEL_PATH}" == *"/modules/"* ]]; then
-        KERNEL_VERSION="$(basename "$(dirname "${KERNEL_PATH}")")"
-    else
-        KERNEL_VERSION="${KERNEL_PATH##*/vmlinuz-}"
-        if [ "${KERNEL_VERSION}" = "${KERNEL_PATH}" ] || [ -z "${KERNEL_VERSION}" ]; then
-            KERNEL_VERSION="$(find /lib/modules /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | head -n 1)"
-        fi
-    fi
-
-    [ -n "${KERNEL_VERSION}" ] || fail "Unable to determine kernel version from payload"
-
+    KERNEL_VERSION="${KERNEL_PATH##*/vmlinuz-}"
     CONFIG="/boot/config-${KERNEL_VERSION}"
-    [ -f "${CONFIG}" ] || CONFIG="/usr/lib/modules/${KERNEL_VERSION}/config"
-    [ -f "${CONFIG}" ] || CONFIG="/lib/modules/${KERNEL_VERSION}/config"
     [ -f "${CONFIG}" ] || fail "Kernel closure has no matching config: ${CONFIG}"
-
     SYSTEM_MAP="/boot/System.map-${KERNEL_VERSION}"
-    [ -f "${SYSTEM_MAP}" ] || SYSTEM_MAP="/usr/lib/modules/${KERNEL_VERSION}/System.map"
-    [ -f "${SYSTEM_MAP}" ] || SYSTEM_MAP="/lib/modules/${KERNEL_VERSION}/System.map"
     [ -f "${SYSTEM_MAP}" ] || fail "Kernel closure has no matching symbol map: ${SYSTEM_MAP}"
-
     [ -d "/lib/modules/${KERNEL_VERSION}" ] || [ -d "/usr/lib/modules/${KERNEL_VERSION}" ] ||
         fail "Kernel closure has no matching modules tree"
-
     grep -q '^CONFIG_EFI_STUB=y$' "${CONFIG}" || fail "Selected kernel lacks CONFIG_EFI_STUB=y"
-
     if [ "${DISTRIBUTION_ARCH}" = i386 ] && [ "${KERNEL_APT_ARCH}" = amd64 ]; then
-        for SYMBOL in CONFIG_BINFMT_ELF CONFIG_IA32_EMULATION; do
+        for SYMBOL in CONFIG_BINFMT_ELF CONFIG_IA32_EMULATION CONFIG_EFI_MIXED; do
             grep -q "^${SYMBOL}=y$" "${CONFIG}" || fail "Selected mixed-mode kernel lacks ${SYMBOL}=y"
         done
-    fi
-
-    if [ -f "${KERNEL_PATH}" ] && [ "${KERNEL_PATH}" != "/boot/vmlinuz-${KERNEL_VERSION}" ]; then
-        cp -af "${KERNEL_PATH}" "/boot/vmlinuz-${KERNEL_VERSION}"
-    fi
-
-    if [ -f "${CONFIG}" ] && [ "${CONFIG}" != "/boot/config-${KERNEL_VERSION}" ]; then
-        cp -af "${CONFIG}" "/boot/config-${KERNEL_VERSION}"
-    fi
-
-    if [ -f "${SYSTEM_MAP}" ] && [ "${SYSTEM_MAP}" != "/boot/System.map-${KERNEL_VERSION}" ]; then
-        cp -af "${SYSTEM_MAP}" "/boot/System.map-${KERNEL_VERSION}"
     fi
 }
 
 decompress_modules() {
-    local FILE OUTPUT
+    local FILE OUTPUT MODULES_ROOT
+
+    if [ -L /lib ]; then
+        MODULES_ROOT=/usr/lib/modules
+    else
+        MODULES_ROOT=/lib/modules
+    fi
 
     while IFS= read -r FILE; do
-        [ -f "${FILE}" ] || continue
-        
         OUTPUT="${FILE%.xz}"
         xz -dc "${FILE}" >"${OUTPUT}.tmp"
         chmod --reference="${FILE}" "${OUTPUT}.tmp"
         mv "${OUTPUT}.tmp" "${OUTPUT}"
         rm -f "${FILE}"
-    done < <(find /lib/modules /usr/lib/modules -type f -name '*.ko.xz' 2>/dev/null)
-    
+    done < <(find "${MODULES_ROOT}" -type f -name '*.ko.xz' -print 2>/dev/null)
     while IFS= read -r FILE; do
-        [ -f "${FILE}" ] || continue
-        
         OUTPUT="${FILE%.zst}"
         zstd -q -d -c "${FILE}" >"${OUTPUT}.tmp"
         chmod --reference="${FILE}" "${OUTPUT}.tmp"
         mv "${OUTPUT}.tmp" "${OUTPUT}"
         rm -f "${FILE}"
-    done < <(find /lib/modules /usr/lib/modules -type f -name '*.ko.zst' 2>/dev/null)
-    
+    done < <(find "${MODULES_ROOT}" -type f -name '*.ko.zst' -print 2>/dev/null)
     depmod -b / "${KERNEL_VERSION}"
 }
 
@@ -492,9 +454,6 @@ write_package_metadata() {
     : >"${WORK}/package-fragments"
     while IFS=$'\t' read -r DEB NAME VERSION ARCH SOURCE HASH ROLE INSTANCE ROOT CONTROL; do
         PATHS="${ROOT%/payload}/paths"
-        # Private APT downloads transient dependencies to validate and materialize
-        # the kernel closure. Native deployment installs its own target toolchain;
-        # only packages represented by the materialized kernel payload are locked.
         [ "${ROLE}" != dependency ] || continue
         {
             dpkg-deb -f "${DEB}" | sed '1a Status: install ok installed'
@@ -642,8 +601,6 @@ write_manifest() {
         printf '  "userspace": {"family": "%s", "suite": "' "${DISTRIBUTION_PROFILE}"
         json_escape "${DISTRIBUTION}"
         printf '", "dpkg_architecture": "%s"},\n' "${DISTRIBUTION_ARCH}"
-        # format-1 kernel metadata is consumed by minios-installer with an exact
-        # schema. KERNEL_PROVIDER belongs to the build-time kernel.lock only.
         printf '  "kernel": {"distribution": "'
         json_escape "${KERNEL_SOURCE_SUITE}"
         printf '", "version": "'
