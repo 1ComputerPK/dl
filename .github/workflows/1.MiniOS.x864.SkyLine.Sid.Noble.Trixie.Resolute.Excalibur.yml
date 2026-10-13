@@ -10,12 +10,13 @@ env:
   iMageSize: 50GiB
   MainDir: /builder
 
+  BaseBuild: https://github.com/minios-linux/minios-live.git
   BuildDL: https://github.com/1ComputerPK/dl/releases/download/dl/zMiniOS.SkyLine.01.10.2026.tar.xz
   BuildSource: zMiniOS.SkyLine.01.10.2026.tar.xz
   BuildDir: MiniOS.SkyLine.2026
-  BaseVersion: Lastest
   CustomVersion: SkyLine Edition 2026 LXFice
   FirefoxDir: linux-live/scripts/03-gui-base/rootcopy-postinstall/opt/
+  FirefoxURL: https://ftp.mozilla.org/pub/firefox/releases/140.17.0esr/${ARCH}/en-US/firefox-140.17.0esr.tar.xz
 
 jobs:
   build:
@@ -59,20 +60,20 @@ jobs:
         working-directory: /builder
         run: |
           git clone --depth 1 --single-branch --no-tags \
-           https://github.com/minios-linux/minios-live.git ${{ env.BuildDir }}
+           ${{ env.BaseBuild }} ${{ env.BuildDir }}
           wget -nv "${{ env.BuildDL }}"
           tar -xf "${{ env.BuildSource }}"
 
+          Target2OPT="/builder/${{ env.BuildDir }}/${{ env.FirefoxDir }}"
+          mkdir -p "$Target2OPT"
+
           if [ "${{ matrix.arch }}" = "amd64" ]; then
-            FFURL="https://download.mozilla.org/?product=firefox-esr-latest&os=linux64&lang=en-US"
+            ARCH="linux-x86_64"
           else
-            FFURL="https://download.mozilla.org/?product=firefox-esr-latest&os=linux&lang=en-US"
+            ARCH="linux-i686"
           fi
 
-          Target2OPT="/builder/${{ env.BuildDir }}/${{ env.FirefoxDir }}"
-
-          mkdir -p "$Target2OPT"
-          wget -nv "$FFURL" -O firefox-esr.tar.xz
+          wget -nv "${{ env.FirefoxURL }}" -O firefox-esr.tar.xz
           tar -xf firefox-esr.tar.xz -C "$Target2OPT" --transform 's/^firefox/firefox-esr/'
 
       - name: Build | Compile
