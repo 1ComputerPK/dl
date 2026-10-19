@@ -1,4 +1,4 @@
-name: 2. MiniOS x864 Build LXFice Sid Noble Trixie Resolute Excalibur
+name: 2. MiniOS x864 SkyLine LXCice Sid Noble Trixie Resolute Excalibur
 
 on:
   schedule:
@@ -10,13 +10,15 @@ env:
   iMageSize: 50GiB
   MainDir: /builder
 
-  BuildDL: https://github.com/1ComputerPK/dl/releases/download/dl/zMiniOS.Build.01.10.2026.tar.xz
-  BuildSource: zMiniOS.Build.01.10.2026.tar.xz
+  BaseBuild: https://github.com/minios-linux/minios-live.git
+  #BaseBuild: https://github.com/1ComputerPK/minios.git
+  BuildDL: https://github.com/1ComputerPK/minios/releases/download/dl/MiniOS.Build.20.10.2026.tar.xz
+  BuildSource: MiniOS.Build.20.10.2026.tar.xz
   BuildDir: MiniOS.Build.2026
-  BaseVersion: Lastest
-  CustomVersion: SkyLine Edition 2026 LXFice
+  CustomVersion: SkyLine Edition 2026 LXCice
   FirefoxDir: linux-live/scripts/03-gui-base/rootcopy-postinstall/opt/
-  FirefoxURL: https://ftp.mozilla.org/pub/firefox/releases/140.17.0esr/${ARCH}/en-US/firefox-140.17.0esr.tar.xz
+  Firefox64URL: https://download.mozilla.org/?product=firefox-esr-latest&os=linux64&lang=en-US
+  Firefox86URL: https://ftp.mozilla.org/pub/firefox/releases/140.17.0esr/linux-i686/en-US/firefox-140.17.0esr.tar.xz
 
 jobs:
   build:
@@ -30,9 +32,9 @@ jobs:
         board: [ uefi-x86 ]
         arch: [ amd64 ]
         include:
-          - { release: trixie, arch: i386, board: uefi-x86 }
+          #- { release: trixie, arch: i386, board: uefi-x86 }
           - { release: bookworm, arch: i386, board: uefi-x86 }
-          - { release: excalibur, arch: i386, board: uefi-x86 }
+          #- { release: excalibur, arch: i386, board: uefi-x86 }
 
     steps:
       - name: Prepare | Init & LVM
@@ -62,17 +64,16 @@ jobs:
           wget -nv "${{ env.BuildDL }}"
           tar -xf "${{ env.BuildSource }}"
 
-          Target2OPT="/builder/${{ env.BuildDir }}/${{ env.FirefoxDir }}"
-          mkdir -p "$Target2OPT"
+          FF2opt="/builder/${{ env.BuildDir }}/${{ env.FirefoxDir }}"
+          mkdir -p "$FF2opt"
 
           if [ "${{ matrix.arch }}" = "amd64" ]; then
-            ARCH="linux-x86_64"
+            wget -nv "${{ env.Firefox64URL }}" -O firefox-esr.tar.xz
           else
-            ARCH="linux-i686"
+            wget -nv "${{ env.Firefox86URL }}" -O firefox-esr.tar.xz
           fi
 
-          wget -nv "${{ env.FirefoxURL }}" -O firefox-esr.tar.xz
-          tar -xf firefox-esr.tar.xz -C "$Target2OPT" --transform 's/^firefox/firefox-esr/'
+          tar -xf firefox-esr.tar.xz -C "$FF2opt" --transform 's/^firefox/firefox-esr/'
 
       - name: Build | Compile
         working-directory: /builder/${{ env.BuildDir }}
@@ -83,7 +84,7 @@ jobs:
            mtools rsync grub-common e2fsprogs lvm2 pv wget gettext gpgv musl \
            shim-signed grub-efi-amd64-bin grub-efi-amd64-signed musl-tools gcc-multilib
 
-          sudo -E bash ./minios-cmd -d ${{ matrix.release }} -a ${{ matrix.arch }} -de xfce \
+          sudo -E bash ./minios-cmd -d ${{ matrix.release }} -a ${{ matrix.arch }} -de cinnamon \
            -pv standard -c zstd -l en_US -tz "${TZ}" -ib dracut
 
       - name: Upload | ISO
