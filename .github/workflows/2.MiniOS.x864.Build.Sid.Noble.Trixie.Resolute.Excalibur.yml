@@ -12,8 +12,8 @@ env:
 
   BaseBuild: https://github.com/minios-linux/minios-live.git
   #BaseBuild: https://github.com/1ComputerPK/minios.git
-  BuildDL: https://github.com/1ComputerPK/minios/releases/download/dl/MiniOS.Build.20.10.2026.tar.xz
-  BuildSource: MiniOS.Build.20.10.2026.tar.xz
+  BuildDL: https://github.com/1ComputerPK/minios/releases/download/dl/zMiniOS.Build.01.10.2026.tar.xz
+  BuildSource: zMiniOS.Build.01.10.2026.tar.xz
   BuildDir: MiniOS.Build.2026
   CustomVersion: SkyLine Edition 2026 LXCice
   FirefoxDir: linux-live/scripts/03-gui-base/rootcopy-postinstall/opt/
