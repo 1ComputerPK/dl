@@ -28,12 +28,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        release: [ sid, noble, trixie, bookworm, resolute, excalibur ]
+        release: [ sid, trixie, resolute, excalibur ]
         board: [ uefi-x86 ]
         arch: [ amd64 ]
         include:
           - { release: trixie, arch: i386, board: uefi-x86 }
-          - { release: bookworm, arch: i386, board: uefi-x86 }
+          #- { release: bookworm, arch: i386, board: uefi-x86 }
           - { release: excalibur, arch: i386, board: uefi-x86 }
 
     steps:
