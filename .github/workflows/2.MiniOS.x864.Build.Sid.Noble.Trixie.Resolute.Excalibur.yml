@@ -1,4 +1,4 @@
-name: 2. MiniOS x864 SkyLine LXCice Sid Noble Trixie Resolute Excalibur
+name: 2. MiniOS x864 SkyLine LXFice Sid Noble Trixie Resolute Excalibur
 
 on:
   schedule:
@@ -12,10 +12,10 @@ env:
 
   BaseBuild: https://github.com/minios-linux/minios-live.git
   #BaseBuild: https://github.com/1ComputerPK/minios.git
-  BuildDL: https://github.com/1ComputerPK/minios/releases/download/dl/zMiniOS.Build.01.10.2026.tar.xz
-  BuildSource: zMiniOS.Build.01.10.2026.tar.xz
+  BuildDL: https://github.com/1ComputerPK/minios/releases/download/dl/MiniOS.Build.18.10.2026.tar.xz
+  BuildSource: MiniOS.Build.18.10.2026.tar.xz
   BuildDir: MiniOS.Build.2026
-  CustomVersion: SkyLine Edition 2026 LXCice
+  CustomVersion: SkyLine Edition 2026 LXFice
   FirefoxDir: linux-live/scripts/03-gui-base/rootcopy-postinstall/opt/
   Firefox64URL: https://download.mozilla.org/?product=firefox-esr-latest&os=linux64&lang=en-US
   Firefox86URL: https://ftp.mozilla.org/pub/firefox/releases/140.17.0esr/linux-i686/en-US/firefox-140.17.0esr.tar.xz

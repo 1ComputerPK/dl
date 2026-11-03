@@ -12,8 +12,8 @@ env:
 
   BaseBuild: https://github.com/minios-linux/minios-live.git
   #BaseBuild: https://github.com/1ComputerPK/minios.git
-  BuildDL: https://github.com/1ComputerPK/minios/releases/download/dl/zMiniOS.SkyLine.01.10.2026.tar.xz
-  BuildSource: zMiniOS.SkyLine.01.10.2026.tar.xz
+  BuildDL: https://github.com/1ComputerPK/minios/releases/download/dl/MiniOS.SkyLine.25.10.2026.tar.xz
+  BuildSource: MiniOS.SkyLine.25.10.2026.tar.xz
   BuildDir: MiniOS.SkyLine.2026
   CustomVersion: SkyLine Edition 2026 LXCice
   FirefoxDir: linux-live/scripts/03-gui-base/rootcopy-postinstall/opt/
@@ -28,13 +28,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        release: [ sid, noble, trixie, bookworm, resolute, excalibur ]
+        release: [ sid, trixie, resolute, excalibur ]
         board: [ uefi-x86 ]
         arch: [ amd64 ]
+        de: [ lxqt ]
         include:
-          #- { release: trixie, arch: i386, board: uefi-x86 }
-          - { release: bookworm, arch: i386, board: uefi-x86 }
-          #- { release: excalibur, arch: i386, board: uefi-x86 }
+          - { release: noble, arch: amd64, de: lxqt, board: uefi-x86 }
+          - { release: bookworm, arch: amd64, de: lxqt, board: uefi-x86 }
+          - { release: bookworm, arch: i386, de: lxqt, board: uefi-x86 }
+          #- { release: excalibur, arch: i386, de: lxqt, board: uefi-x86 }
+          #- { release: trixie, arch: i386, de: lxqt, board: uefi-x86 }
 
     steps:
       - name: Prepare | Init & LVM
@@ -86,7 +89,7 @@ jobs:
            mtools rsync grub-common e2fsprogs lvm2 pv wget gettext gpgv musl \
            shim-signed grub-efi-amd64-bin grub-efi-amd64-signed musl-tools gcc-multilib
 
-          sudo -E bash ./minios-cmd -d ${{ matrix.release }} -a ${{ matrix.arch }} -de cinnamon \
+          sudo -E bash ./minios-cmd -d ${{ matrix.release }} -a ${{ matrix.arch }} -de ${{ matrix.de }} \
            -pv standard -c zstd -l en_US -tz "${TZ}" -ib dracut
 
       - name: Upload | ISO
