@@ -165,7 +165,7 @@ configfile /minios/boot/grub/1compk.cfg
 
 #add :
         # File systems
-        "iso9660.mod" "udf.mod" "fat.mod" "ext2.mod" "btrfs.mod" "f2fs.mod" "xfs.mod" "ntfs.mod" "exfat.mod"
+        "iso9660.mod" "udf.mod" "fat.mod" "ext2.mod" "btrfs.mod" "xfs.mod" "f2fs.mod" "ntfs.mod" "exfat.mod"
 
 
             iso9660 udf fat ext2 btrfs f2fs xfs ntfs exfat \
